@@ -11,8 +11,20 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
+	"path"
 	"time"
 )
+
+var errorCode = map[int]string{
+	400: "请求参数格式错误",
+	401: "邮箱或者密码不正确",
+	801: "无效参数",
+	813: "账户过期",
+	500: "服务器内部错误",
+	630: "未注册",
+	814: "无团队用户",
+}
 
 type Config struct {
 	BaseURL string `json:"baseURL"`
@@ -32,17 +44,26 @@ func (c *Config) Open(_ string, logger log.Logger) (connector.Connector, error) 
 	if c.BaseURL == "" {
 		return nil, fmt.Errorf("ones: no baseURL provided for ones connector")
 	}
+	_, err := url.Parse(c.BaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("ones: baseURL syntax error")
+	}
 	return &onesConnector{Config: *c, logger: logger}, nil
 }
 
+// user info
 type user struct {
-	Uuid     string `json:"uuid"`
-	Email    string `json:"email"`
-	Name     string `json:"name"`
-	Token    string `json:"token"`
+	Uuid  string `json:"uuid"`
+	Email string `json:"email"`
+	// chinese name
+	Name  string `json:"name"`
+	Token string `json:"token"`
+	// worker id
 	IdNumber string `json:"id_number"`
 	Avatar   string `json:"avatar"`
 }
+
+// Ones login response
 type onesLoginResponse struct {
 	User user
 }
@@ -70,40 +91,48 @@ func (o *onesConnector) onesAPIClient() *http.Client {
 		},
 	}
 }
-func (o *onesConnector) Login(ctx context.Context, s connector.Scopes, username, password string) (identity connector.Identity, validPassword bool, err error) {
-	req, err := o.onesLoginRequest(ctx, "POST", "/project/api/project/auth/login", struct {
+func (o *onesConnector) Login(ctx context.Context, _ connector.Scopes, username, password string) (identity connector.Identity, validPassword bool, err error) {
+	req, err := o.createRequest(ctx, "POST", "/project/api/project/auth/login", struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}{Email: username, Password: password})
 	if err != nil {
-		return connector.Identity{}, false, fmt.Errorf("ones: new login api request %v", err)
+		return connector.Identity{}, false, err
 	}
 	response, err := o.onesAPIClient().Do(req)
 	if err != nil {
 		return connector.Identity{}, false, fmt.Errorf("ones: login api request error %v", err)
 	}
 	defer response.Body.Close()
-
+	if response.StatusCode == http.StatusUnauthorized {
+		return connector.Identity{}, false, nil
+	}
 	validateOnesResponse, err := o.validateOnesResponse(response)
 	if err != nil {
-		return connector.Identity{}, false, fmt.Errorf("ones: login api request error %v", err)
+		return connector.Identity{}, false, err
 	}
 	var loginResp onesLoginResponse
 
 	if err := json.Unmarshal(validateOnesResponse, &loginResp); err != nil {
 		return connector.Identity{}, false, fmt.Errorf("unmarshal auth pass response: %d %v %q", response.StatusCode, err, string(validateOnesResponse))
 	}
-	request, err := o.onesLoginRequest(ctx, "GET", "/project/api/project/users/me", nil)
+	request, err := o.createRequest(ctx, "GET", "/project/api/project/users/me", nil)
 	if err != nil {
-		return connector.Identity{}, false, fmt.Errorf("ones: new login api request %v", err)
+		return connector.Identity{}, false, err
 	}
 	request.Header.Set("Ones-Auth-Token", loginResp.User.Token)
 	request.Header.Set("Ones-User-Id", loginResp.User.Uuid)
 	response, err = o.onesAPIClient().Do(request)
 	defer response.Body.Close()
+	if err != nil {
+		return connector.Identity{}, false, fmt.Errorf("ones: user info api request error %v", err)
+	}
+	if response.StatusCode == http.StatusUnauthorized {
+		return connector.Identity{}, false, nil
+	}
 	onesUserInfoResponse, err := o.validateOnesResponse(response)
 	if err != nil {
-		return connector.Identity{}, false, fmt.Errorf("ones: login api request error %v", err)
+		return connector.Identity{}, false, err
 	}
 	var userResp user
 	if err := json.Unmarshal(onesUserInfoResponse, &userResp); err != nil {
@@ -130,8 +159,8 @@ func (o *onesConnector) Login(ctx context.Context, s connector.Scopes, username,
 	return identity, true, nil
 }
 
-// onesLoginRequest create a http.Request with basic auth, json payload and Accept header
-func (o *onesConnector) onesLoginRequest(ctx context.Context, method string, apiURL string, jsonPayload interface{}) (*http.Request, error) {
+// createRequest create a http.Request, json payload and Accept header
+func (o *onesConnector) createRequest(ctx context.Context, method string, apiURL string, jsonPayload interface{}) (*http.Request, error) {
 	var body io.Reader
 	if jsonPayload != nil {
 		jsonData, err := json.Marshal(jsonPayload)
@@ -140,8 +169,9 @@ func (o *onesConnector) onesLoginRequest(ctx context.Context, method string, api
 		}
 		body = bytes.NewReader(jsonData)
 	}
-
-	req, err := http.NewRequest(method, fmt.Sprintf("%s%s", o.BaseURL, apiURL), body)
+	baseUrl, _ := url.Parse(o.BaseURL)
+	baseUrl.Path = path.Join(baseUrl.Path, apiURL)
+	req, err := http.NewRequest(method, baseUrl.String(), body)
 	if err != nil {
 		return nil, fmt.Errorf("new API req: %v", err)
 	}
@@ -158,12 +188,18 @@ func (o *onesConnector) onesLoginRequest(ctx context.Context, method string, api
 func (o *onesConnector) validateOnesResponse(resp *http.Response) ([]byte, error) {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
+		o.logger.Debugf("validate response read error %v", err)
 		return nil, fmt.Errorf("ones: read user body: %v", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		o.logger.Debugf("ones response validation failed: %s", string(body))
-		return nil, fmt.Errorf("认证失败！ 请检查用户名密码！")
+		errorMessage, ok := errorCode[resp.StatusCode]
+		if ok {
+			return nil, fmt.Errorf(errorMessage)
+		} else {
+			return nil, fmt.Errorf("unknow error")
+		}
 	}
 
 	return body, nil
