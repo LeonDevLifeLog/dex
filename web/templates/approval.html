@@ -1,19 +1,19 @@
 {{ template "header.html" . }}
 
 <div class="theme-panel">
-  <h2 class="theme-heading">Grant Access</h2>
+  <h2 class="theme-heading">授权申请</h2>
 
   <hr class="dex-separator">
   <div>
     {{ if .Scopes }}
-    <div class="dex-subtle-text">{{ .Client }} would like to:</div>
+    <div class="dex-subtle-text">{{ .Client }} 想申请以下信息:</div>
     <ul class="dex-list">
       {{ range $scope := .Scopes }}
       <li>{{ $scope }}</li>
       {{ end }}
     </ul>
     {{ else }}
-    <div class="dex-subtle-text">{{ .Client }} has not requested any personal information</div>
+    <div class="dex-subtle-text">{{ .Client }} 没有请求任何私人信息</div>
     {{ end }}
   </div>
   <hr class="dex-separator">
@@ -24,7 +24,7 @@
         <input type="hidden" name="req" value="{{ .AuthReqID }}"/>
         <input type="hidden" name="approval" value="approve">
         <button type="submit" class="dex-btn theme-btn--success">
-            <span class="dex-btn-text">Grant Access</span>
+            <span class="dex-btn-text">确认授权</span>
         </button>
       </form>
     </div>
@@ -33,7 +33,7 @@
         <input type="hidden" name="req" value="{{ .AuthReqID }}"/>
         <input type="hidden" name="approval" value="rejected">
         <button type="submit" class="dex-btn theme-btn-provider">
-            <span class="dex-btn-text">Cancel</span>
+            <span class="dex-btn-text">取消授权</span>
         </button>
       </form>
     </div>
