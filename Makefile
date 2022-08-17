@@ -8,7 +8,7 @@ REPO_PATH=$(ORG_PATH)/$(PROJ)
 
 VERSION ?= $(shell ./scripts/git-version)
 
-DOCKER_REPO=quay.io/dexidp/dex
+DOCKER_REPO=quay.io/dexidp/dex-ones
 DOCKER_IMAGE=$(DOCKER_REPO):$(VERSION)
 
 $( shell mkdir -p bin )
@@ -91,7 +91,7 @@ fix: ## Fix lint violations
 
 .PHONY: docker-image
 docker-image:
-	@sudo docker build -t $(DOCKER_IMAGE) .
+        @sudo docker build -t $(DOCKER_IMAGE) --build-arg GOPROXY=https://proxy.golang.com.cn,direct .
 
 .PHONY: verify-proto
 verify-proto: proto

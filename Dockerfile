@@ -4,6 +4,7 @@ FROM golang:1.18.4-alpine3.15 AS builder
 
 WORKDIR /usr/local/src/dex
 
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apk/repositories
 RUN apk add --no-cache --update alpine-sdk ca-certificates openssl
 
 ARG TARGETOS
@@ -37,12 +38,12 @@ ARG TARGETVARIANT
 ENV GOMPLATE_VERSION=v3.10.0
 
 RUN wget -O /usr/local/bin/gomplate \
-    "https://github.com/hairyhenderson/gomplate/releases/download/${GOMPLATE_VERSION}/gomplate_${TARGETOS:-linux}-${TARGETARCH:-amd64}${TARGETVARIANT}" \
+    "https://ghproxy.com/github.com/hairyhenderson/gomplate/releases/download/${GOMPLATE_VERSION}/gomplate_${TARGETOS:-linux}-${TARGETARCH:-amd64}${TARGETVARIANT}" \
     && chmod +x /usr/local/bin/gomplate
 
 # For Dependabot to detect base image versions
 FROM alpine:3.16.1 AS alpine
-FROM gcr.io/distroless/static:latest AS distroless
+FROM kubeimages/distroless-static:latest AS distroless
 
 FROM $BASE_IMAGE
 
