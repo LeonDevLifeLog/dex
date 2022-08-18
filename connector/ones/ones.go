@@ -26,6 +26,14 @@ var errorCode = map[int]string{
 	814: "无团队用户",
 }
 
+type errorResponse struct {
+	Code    int    `json:"code"`
+	ErrCode string `json:"errcode"`
+	Field   string `json:"field"`
+	Model   string `json:"model"`
+	Reason  string `json:"reason"`
+	Type    string `json:"type"`
+}
 type Config struct {
 	BaseURL string `json:"baseURL"`
 	// UsernamePrompt allows users to override the username attribute (displayed
@@ -104,7 +112,8 @@ func (o *onesConnector) Login(ctx context.Context, _ connector.Scopes, username,
 		return connector.Identity{}, false, fmt.Errorf("ones: login api request error %v", err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode == http.StatusUnauthorized {
+	validPass := o.isValidPass(response)
+	if !validPass {
 		return connector.Identity{}, false, nil
 	}
 	validateOnesResponse, err := o.validateOnesResponse(response)
@@ -195,12 +204,25 @@ func (o *onesConnector) validateOnesResponse(resp *http.Response) ([]byte, error
 	if resp.StatusCode != http.StatusOK {
 		o.logger.Debugf("ones response validation failed: %s", string(body))
 		errorMessage, ok := errorCode[resp.StatusCode]
+		var errorResp errorResponse
+		err := json.Unmarshal(body, &errorResp)
+		if err != nil {
+			o.logger.Errorf("ones: error response unmarshal error %v", err)
+			return nil, err
+		}
 		if ok {
-			return nil, fmt.Errorf(errorMessage)
+			return nil, fmt.Errorf("%s %s", errorMessage, errorResp.ErrCode)
 		} else {
-			return nil, fmt.Errorf("unknow error")
+			return nil, fmt.Errorf("unknow error: %s", errorResp.ErrCode)
 		}
 	}
 
 	return body, nil
+}
+
+func (o *onesConnector) isValidPass(response *http.Response) bool {
+	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == 801 /*invalid password parameter*/ {
+		return false
+	}
+	return true
 }
