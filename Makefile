@@ -91,7 +91,7 @@ fix: ## Fix lint violations
 
 .PHONY: docker-image
 docker-image:
-        @sudo docker build -t $(DOCKER_IMAGE) --build-arg GOPROXY=https://proxy.golang.com.cn,direct .
+	@sudo docker build -t $(DOCKER_IMAGE) --build-arg GOPROXY=https://proxy.golang.com.cn,direct .
 
 .PHONY: verify-proto
 verify-proto: proto
